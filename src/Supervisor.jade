@@ -1,0 +1,216 @@
+agent Supervisor uses ontology WorkOntology
+    #Agent attributes
+    property listFinishedToys as list of BaseToy
+    property availableTotalToys as integer
+    property emptyToy = BaseToy(ToyParts("head", "empty"), ToyParts("arms", "empty"), ToyParts("legs", "empty")) as BaseToy
+    property totalToys = 0 as integer
+    
+    property CoSupervisor as aid
+    
+    property listOfManagerWorkers as list of aid
+    property listOfWorkers as list of aid
+    property numTotalWorker = 0 as integer
+    
+    property stopWork = false as boolean
+
+    on create with args as aid do
+        log "Agent 'Supervisor' created with arguments: "+args
+        
+        CoSupervisor of agent = args
+            
+        availableTotalToys of agent = 4
+        totalToys of agent = availableTotalToys of agent
+   
+        activate TakeFinishedToy
+        activate GiveNewToy
+        activate UpdateCountFinisheTotalToys
+        activate AssistanceNeeded
+        activate gatherActiveWorkers
+        
+    
+    # hasAnyItems: return if worker still has any piece in the inventory
+    function hasAnyItems(availableParts as list of BaseToy) as integer do
+        countItem = 0
+        tempInv_ = [] of BaseToy
+        
+        for item in availableParts do
+            countItem = countItem + 1            
+
+        return countItem
+        
+    # gatherActiveWorkers: update number of workers and list of individuals working under the responsibility of the Supervisor
+    cyclic behaviour gatherActiveWorkers
+        on message inform notifySupervisor do
+            
+            # If the sender is the CoSupervisor just update number of worker
+            if ((name of sender of message) as text) = ((name of CoSupervisor) as text) do
+                numTotalWorker of agent = numTotalWorker+1
+                #log "numTotalWorker "+ numTotalWorker + " sender: "+ name of sender of message
+                
+            
+            # Else if the sender isn't a Supervisor, add them to the list of individuals under Supervisor responsibility
+            else do
+	            add sender of message to listOfWorkers of agent
+	            log "+ SUPERVISOR : " + name of sender of message + " WORKS UNDER SUPERVISION OF "+ name of agent + " : " + listOfWorkers of agent
+	            
+	            # If it's a Worker add to number of Workers and notify CoSupervisor of their presence
+	            if ((name of sender of message) as text)[0] = "W" do
+		            numTotalWorker of agent = numTotalWorker+1
+		            send message inform notifySupervisor to CoSupervisor
+	                    
+    # TakeFinishedToy: upon receiving finished toy both notify Worker and Supervisor, declare end of day if there are no more toys
+    cyclic behaviour TakeFinishedToy
+    
+        on message request deliverFinishedToy(finishedToy as BaseToy) do
+            log "+ SUPERVISOR : I RECIVED FINISHED TOY " + finishedToy + " OF " + name of sender of message
+            add finishedToy to listFinishedToys of agent
+            
+            # Notify both CoSupervisor and Worker that a finished toy has been delivered successfully 
+            send message request confirmFinishedToy(finishedToy) to sender of message
+            send message request confirmFinishedToy(finishedToy) to CoSupervisor
+            totalToys of agent = totalToys - 1
+            
+            # If there are no more unfinished toys, notify Workers and Suppliers 
+            if totalToys = 0 do
+                activate noMoreToys
+
+    # GiveNewToy: upon receiving toys or request for new toys update number of toys and notify CoSupervisor
+    cyclic behaviour GiveNewToy
+    
+        on message request askToy(worker) do
+            # If it's possible to continue working
+            if not stopWork do
+	            log "+ SUPERVISOR: REQUESTED TOY FROM " + name of sender of message #+ " availableTotalToys: " + availableTotalToys of agent
+
+                #If there are still new toys to give
+	            if (availableTotalToys > 0) do
+		            availableTotalToys of agent = availableTotalToys of agent - 1
+                    
+                    # Deliver new toy to Worker and update CoSupervisor that a new toy has been given
+		            send message request deliverNewToy(emptyToy) to CoSupervisor
+	                send message request deliverNewToy(emptyToy) to sender of message
+                
+                # Otherwise if there are no toys available
+	            else do
+	                log "+ SUPERVISOR : DENIED NO TOY IN INVENTORY [REQUEST FROM "+ name of sender of message +"] "
+	                
+        
+        on message request passToyToWorker(newToy) do
+            log "+ SUPERVISOR: REQUESTED TOY SENT BACK FROM "+ name of sender of message #+ " availableTotalToys: " + (availableTotalToys of agent + 1)
+            availableTotalToys of agent = availableTotalToys of agent + 1
+            
+            # If a Worker sends back toy, notify CoSupervisor
+            if sender of message ≠ name of CoSupervisor do
+                send message request passToyToWorker(emptyToy) to CoSupervisor
+
+    # UpdateCountFinisheTotalToys: upon receiving messages, update number of toys available
+    cyclic behaviour UpdateCountFinisheTotalToys
+        
+        on message request confirmFinishedToy(finishedToy) do
+            totalToys of agent = totalToys - 1
+
+            if totalToys = 0 do
+                activate noMoreToys
+    
+        on message request deliverNewToy(finishedToy) do
+            availableTotalToys of agent = availableTotalToys of agent - 1
+            log "+ SUPERVISOR -> SUPERVISOR : UPDATE AVAILABLE BASETOYS"
+                
+        on message inform informOnInitialToy do
+            totalToys of agent = totalToys + 1
+
+            # If a Worker is notifying of having a toy at the start of a shift, notify CoSupervisor and add Worker to the list of Managers
+            if name of sender of message ≠ name of CoSupervisor do
+                log "+ SUPERVISOR : "+ name of sender of message + " DECLARED POSSETION OF A TOY "
+                send message inform informOnInitialToy to CoSupervisor of agent
+                add sender of message to listOfManagerWorkers
+    
+    # Complaint: upon receiving a message 
+    cyclic behaviour AssistanceNeeded
+        # upon receiving a complaint from a Worker inform the Supplier
+        on message request ComplaintReport(Supplier) do
+            log "+ SUPERVISOR : RECEIVED COMPLAINT FROM " + name of sender of message + " OF " + name of Supplier
+            send message request ComplaintReport(Supplier) to Supplier
+            
+        # upon receiving a request for assistance resolve the technical issues
+        on message inform requestAssistance do
+            send message inform resolveTechnicalIssues to sender of message
+            
+    # noMoreToys : if there're no more toys that need to be finished, declare the end of shift for Workers and Suppliers
+    oneshot behaviour noMoreToys  
+        on execute do
+            stopWork of agent = true
+            destroy TakeFinishedToy
+	        destroy GiveNewToy
+	        destroy UpdateCountFinisheTotalToys
+	        destroy AssistanceNeeded
+	        destroy gatherActiveWorkers
+	        
+            log "+ SUPERVISOR : END OF SHIFT!"
+            activate processWorkingReports
+            
+            # Notify all Workers the end of shift
+            for worker_ in listOfWorkers do
+                send message inform sendWorkingReport to worker_
+   
+    # processWorkingReports: make a report of the work day
+    cyclic behaviour processWorkingReports
+        property n_worker = 0 as integer
+        
+        property total_sum_help = 0 as integer
+        property total_sum_unused = 0 as integer
+        property total_requests = 0 as integer
+        property total_passed_parts = 0 as integer
+        property total_passed_toy = 0 as integer
+        property finished = 0 as integer
+        
+        property maxDeliveredToys = 0 as integer
+        property maxDeliveredToys_worker as aid
+        
+        property maxHelpedWorkers = 0 as integer
+        property maxHelpedToWorkers_worker as aid
+        
+        property maxRequestWorkers = 0 as integer
+        property maxRequestToWorkers_worker as aid
+        
+        on message inform deliverWorkingReport(numberOfWorkerRequest, UnUsedToyParts, numberOfSupplierRequest, numberOfFinishedToys, numberOfPartsPassed, numberOfToyPassed, workerID) do
+            
+            # Only Supervisor1 can print total report of the day, other Supervisor deliver WorkingReports
+            if name of agent ≠ name of "Supervisor1" as aid do
+                send message inform deliverWorkingReport(numberOfWorkerRequest, UnUsedToyParts, numberOfSupplierRequest, numberOfFinishedToys, numberOfPartsPassed, numberOfToyPassed, workerID) to CoSupervisor
+            
+            else do
+                log "+ SUPERVISOR: Report of " + name of workerID + " received."
+                if maxRequestWorkers < numberOfWorkerRequest do
+                    maxRequestWorkers = numberOfWorkerRequest
+                    maxRequestToWorkers_worker = workerID
+                
+                if maxDeliveredToys < numberOfFinishedToys do
+                    maxDeliveredToys = numberOfFinishedToys
+                    maxDeliveredToys_worker = workerID
+                
+                if maxHelpedWorkers < numberOfPartsPassed + numberOfToyPassed do
+                    maxHelpedWorkers = numberOfPartsPassed + numberOfToyPassed
+                    maxHelpedToWorkers_worker = workerID
+                
+			    total_sum_help = total_sum_help + numberOfWorkerRequest
+			    
+			    total_sum_unused = total_sum_unused + UnUsedToyParts
+			    
+			    total_requests = total_requests + numberOfSupplierRequest
+			    total_passed_parts = total_passed_parts + numberOfPartsPassed
+			    total_passed_toy = total_passed_toy + numberOfToyPassed
+			    
+			    finished = finished + numberOfFinishedToys
+
+			    n_worker = n_worker + 1
+			    if n_worker = numTotalWorker and aid of agent = "Supervisor1" as aid do 
+			         log " -------------------------------------------------------------------------------------------"
+			         log " - Total Amount Of Finished Toys : " +finished + "                    - Total Times Toys Were Passed : " + total_passed_toy
+			         log " - Total Amount Of Help Request To Workers : " +total_sum_help + "         - Total Amount Of Toy Parts Requested To Supplier : " + total_requests        
+			         log " - Total Amount Of Toy Parts Unused : " + total_sum_unused + "                - Total Amount Of Toy Parts Were Passed : " + total_passed_parts
+			         log " -------------------------------------------------------------------------------------------"
+			         log " - Worker With More Toy Finished : " +name of maxDeliveredToys_worker + "           - How Many Toys Has Finished : " +maxDeliveredToys
+			         log " - Most Helpful Worker : " +name of maxHelpedToWorkers_worker + "                     - How Many Times Has Helped : " +maxHelpedWorkers
+			         log " - Worker With More Help Requests : " +name of maxRequestToWorkers_worker + "          - How Many Requests Of Helped : " +maxRequestWorkers
+			         log " -------------------------------------------------------------------------------------------"

@@ -1,0 +1,231 @@
+agent Supplier uses ontology WorkOntology
+    
+    property breakingTime = "PT20S" as duration
+    property deliveryTime as duration
+    
+    property waitForAssistence = false as boolean
+    
+    property queueRequest as list of Request
+    property emptyQueue = true as boolean
+    property priceList = [
+    	Price("blue", 3), 
+    	Price("red", 4), 
+    	Price("yellow", 5), 
+    	Price("head", 5), 
+    	Price("arms", 10), 
+    	Price("legs", 10)
+    ] as list of Price 
+    
+    property bluePaint = 10 as integer
+    property redPaint = 10 as integer
+    property yellowPaint = 15 as integer
+    
+    property typeOfSupplier as text
+    
+    property CoSupplier as aid
+    property Supervisor as aid
+    
+    property stopWorking = false as boolean
+    
+    on create with args as list of text do
+        
+        typeOfSupplier of agent = args[0]
+        CoSupplier of agent = args[1] as aid
+        Supervisor of agent = args[2] as aid
+        
+        deliveryTime of agent = howMuchWaitForDelivery(typeOfSupplier)
+        if typeOfSupplier of agent = "Type1" do
+            log "Agent 'Supplier' created with arguments: "+args+" ... Type1 - Breaks often & Fast delivery time"
+	        breakingTime = "PT10S" as duration  
+        else do
+            log "Agent 'Supplier' created with arguments: "+args+" ... Type2 - Breaks infrequently & Slow delivery time"
+            breakingTime = "PT20S" as duration  
+        
+        activate GiveNewToyParts
+        activate technicalIssues after breakingTime
+        activate notifySupplierToSupervisor
+        activate StopDelivery
+        
+    # howMuchWaitForDelivery : given a type of Supplier returns deliveryTime
+    function howMuchWaitForDelivery(typeOfSupplier as text) as duration do
+        if typeOfSupplier of this = "Type1" do
+            return "PT4S" as duration
+        else do
+            return "PT5S" as duration
+    
+    # hasAnyItems: return if worker still has any piece in the inventory
+    function hasAnyItems(availableParts as list of Request) as integer do
+        countItem = 0
+        tempInv_ = [] of Request
+        
+        for item in availableParts do
+            countItem = countItem + 1            
+
+        return countItem
+
+    # costOfToyPart: return cost of a single ToyPart
+    function costOfToyPart(availableParts as ToyParts) as integer do
+        cost=0 
+        for piece_ in priceList do
+            if(item of availableParts = item of piece_) do
+                cost=cost+price of piece_  
+        
+        return cost
+
+    # areThereColors: if there's still paint return true else false
+    function areThereColors as boolean do
+        if redPaint > 0 or yellowPaint > 0 or bluePaint > 0 do
+            return true
+        return false
+
+    # processRequest: return chosen ToyPart, based on ToyPart requested and Type of Supplier
+    function processRequest(request_ as Request) as Request do
+        temp_ = toyPart of request_
+        
+        if typeOfSupplier = "Type1" do 
+            if yellowPaint > 0 do
+                color of temp_ = "yellow"
+                yellowPaint of agent = yellowPaint - 1  
+            else if redPaint > 0 do
+                color of temp_ = "red"
+                redPaint of agent = redPaint - 1 
+            else if bluePaint > 0 do
+                color of temp_ = "blue"
+                bluePaint of agent = bluePaint - 1 
+                            
+            return Request(sender of request_, temp_)
+            
+        else do
+        
+            if bluePaint = yellowPaint and bluePaint = redPaint do
+                if color of temp_ = "yellow" do
+                    yellowPaint of agent = yellowPaint - 1
+                else if color of temp_ = "red" do
+                    redPaint of agent = redPaint - 1
+                else do 
+                    bluePaint of agent = bluePaint - 1
+                return Request(sender of request_, temp_)
+        
+            if yellowPaint > bluePaint do
+                color of temp_ = "yellow"
+                yellowPaint of agent = yellowPaint - 1  
+            else if redPaint > bluePaint do
+                color of temp_ = "red"
+                redPaint of agent = redPaint - 1 
+            else do
+                color of temp_ = "blue"
+                bluePaint of agent = bluePaint - 1 
+                            
+            return Request(sender of request_, temp_)
+
+    # notifySupplierToSupervisor : Notifies the Supervisor that the current Supplier works for under their supervision
+    oneshot behaviour notifySupplierToSupervisor
+        on execute do
+            send message inform notifySupervisor to Supervisor
+
+    # StopDelivery : upon receiving message of Supervisor stop working
+    cyclic behaviour StopDelivery
+        on message inform sendWorkingReport do
+            stopWorking of agent = true
+            deactivate GiveNewToyParts
+            destroy technicalIssues
+    
+    # GiveNewToyParts : Upon Worker request send new ToyParts after deliveryTime
+    cyclic behaviour GiveNewToyParts
+    
+        on message request askToyParts(PreferedPart) do
+            if not stopWorking do
+	            log "= SUPPLIER : I RECEIVED REQUEST FOR " + PreferedPart + " FROM "+ name of sender of message
+	            
+	            # If there are no other Request on queue deliver Request piece, otherwise add it to the queue list
+	            if emptyQueue of agent do
+	                emptyQueue of agent = false
+	                activate deliverRequestedPart(Request(sender of message, PreferedPart)) after deliveryTime
+	            else do
+	                add Request(sender of message, PreferedPart) to queueRequest of agent
+        
+        # Upon receiving a Complain work faster for a while
+        on message request ComplaintReport(Supplier as aid) do
+            log "= SUPPLIER : RECEIVED COMPLAINT REPORT FROM " + name of sender of message
+            deliveryTime of agent = "PT1S" as duration
+            activate resetDeliveryTime after "PT5S" as duration
+            
+        # Update paint resources
+        on message request deliverNewToyParts(NewToyPart) do
+            if not stopWorking do
+	            if color of NewToyPart = "yellow" do
+	                yellowPaint = yellowPaint - 1
+	            else if color of NewToyPart = "red" do
+	                redPaint = redPaint - 1
+	            else do
+	                bluePaint = bluePaint - 1
+    
+    # deliverRequestedPart : Process request and send the chosen ToyPart to worker
+    one shot behaviour deliverRequestedPart
+        property request_ as Request
+        
+        on create with request_ as Request do
+            request_ of this = request_
+             
+        on execute do
+            # If Supervisor didn't say to stopWorking deliver request ToyPart
+            if not stopWorking do
+	            emptyQueue of agent = false
+	            
+	            # If Supplier isn't waiting for assistance for technical issues deliver request ToyPart
+	            if waitForAssistence = false do
+	            
+	                # If there is still color resources to use, deliver new ToyPart to Worker
+		            if areThereColors do
+		            
+                        # Supplier choose the actual piece that is going to be sent to the Worker
+			            request_ = processRequest(request_)
+			            send message request deliverNewToyParts(toyPart of request_) to sender of request_
+			            log "= SUPPLIER : DELIVER "+ toyPart of request_ + " to " + name of sender of request_
+			            
+			            # Send message to other Supplier to update color resources
+			            send message request deliverNewToyParts(toyPart of request_) to CoSupplier of agent
+		            
+		                # If there's still requests in queue deliver next worker request
+			            if hasAnyItems(queueRequest of agent) ≠ 0 do
+			                activate deliverRequestedPart(queueRequest[0]) after deliveryTime
+			                remove queueRequest[0] from queueRequest of agent
+		                
+		                # Otherwise the queue is empty 
+			            else do
+			                emptyQueue of agent = true
+	                
+	                # Otherwise if there's no paint the ToyParts cannot be delivered
+		            else do
+		                log "= SUPPLIER : NO PAINT AVAILABLE"
+	            
+	            # Otherwise try again until the technical issues is resolved     
+	            else do
+	                activate deliverRequestedPart(request_)
+    
+    # resetDeliveryTime : reset deliveryTime to its normal value
+    one shot behaviour resetDeliveryTime
+        on execute do
+	        deliveryTime of agent = howMuchWaitForDelivery(typeOfSupplier)
+
+    # tecnicalIssues : at regular intervals the Supplier experiences a technical problem and will need assistance from the Supervisors
+    one shot behaviour technicalIssues
+        on execute do
+            # If Supplier is still working technical issues can occur
+            if not stopWorking do
+	            log "= SUPPLIER : TECHNICAL ISSUE ENCONTERED REQUEST ASSISTANCE TO " + name of Supervisor
+	            send message inform requestAssistance to Supervisor
+	            waitForAssistence of agent = true
+	            activate waitForSupervisor
+            
+    # waitForSupervisor : wait for the Supervisor assistance
+    cyclic behaviour waitForSupervisor
+        on message inform resolveTechnicalIssues do
+            # If Supplier is still working technical issues can be resolved
+            if not stopWorking do
+	            log "= SUPPLIER : TECHNICAL ISSUE RESOLVED"
+	            waitForAssistence of agent = false
+	            if not stopWorking do
+	                activate technicalIssues after breakingTime
+	            destroy this
+        

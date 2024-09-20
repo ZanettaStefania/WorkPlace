@@ -1,0 +1,501 @@
+agent Worker uses ontology WorkOntology
+	#Agent attributes
+	property favoriteColor as text
+    property favoriteToyParts as list of ToyParts
+	
+	property nearbyWorkers as list of aid
+	property currentTask as text
+	property myInventory as list of ToyParts
+	property hasToy as boolean
+    property currentToy as BaseToy
+    property hasAnyFriendWorkers = false as boolean
+    
+	property Supervisor as aid 
+	property Supplier as aid
+
+	property waiting_Supplier as boolean
+	property waiting_CoWorkers as boolean
+    property waiting_Supervisor as boolean
+    
+    property numberNeighbours as integer
+    property WorkerManager as boolean
+    
+    property numberOfWorkerRequest = 0 as integer
+    property numberOfSupplierRequest = 0 as integer
+    property numberOfFinishedToys = 0 as integer
+    property numberOfPartsPassed = 0 as integer
+    property numberOfToyPassed = 0 as integer
+    
+    property stopWorking = false as boolean
+    
+    on create with args as list of text do
+        hasToy of agent = false
+        WorkerManager of agent = false
+        waiting_Supervisor of agent = false
+        waiting_Supplier of agent = false
+        waiting_CoWorkers of agent = false
+
+        initializeWorker(args)
+        log "Agent 'Worker' created with arguments: "+ args + " + " + myInventory of agent
+        favoriteToyParts of agent = [ToyParts("head", favoriteColor of agent), ToyParts("arms", favoriteColor of agent), ToyParts("legs", favoriteColor of agent)]
+
+        currentTask of agent = "WorkOnToy"
+        activate AddPieceBehavior
+        activate listenWorkers
+        activate notifyWorkerToSupervisor
+        activate EndOfShift
+        
+        if hasToy do
+            send message inform informOnInitialToy to Supervisor
+
+        
+    on destroy do
+        log "- WORKER " + name of agent + " : INVENTORY " + myInventory of agent
+        if hasToy do
+            log "- WORKER " + name of agent + " : TOY " + currentToy of agent
+        log "- WORKER " + name of agent + " : STATUS " + currentTask of agent
+    
+    # Function that takes arguments and initialize variables
+    function initializeWorker(arg_list as list of text) as boolean do
+        numberNeighbours of agent = 0
+        for item_ in arg_list do
+            
+            if item_ = "true" do
+                currentToy of agent = BaseToy(ToyParts("head", "empty"), ToyParts("arms", "empty"), ToyParts("legs", "empty"))
+                hasToy of agent = true
+                WorkerManager of agent = true
+                continue
+            
+            if item_[0] = "i" do
+                if item_[3] = "1" do
+                    myInventory of agent = [ToyParts("head", "red"), ToyParts("head", "blu"), ToyParts("head", "yellow")] of ToyParts
+                if item_[3] = "2" do
+                    myInventory of agent = [ToyParts("arms", "red"), ToyParts("arms", "blu"), ToyParts("arms", "yellow")] of ToyParts
+                if item_[3] ="3" do
+                    myInventory of agent = [ToyParts("legs", "red"), ToyParts("legs", "blu"), ToyParts("legs", "yellow")] of ToyParts
+                continue
+
+            if item_[0] = "b" or item_[0] = "r" or item_[0] = "y" do
+                favoriteColor of agent = item_
+                continue
+            
+            if item_[0] = "W" do
+                hasAnyFriendWorkers of agent = true
+                add item_ as aid to nearbyWorkers of agent
+                numberNeighbours of agent = numberNeighbours + 1
+
+            else do
+                temp = item_[0]+item_[1]+item_[2]+item_[3]
+                if temp = "Supe" do
+                    Supervisor of agent = item_ as aid
+                if temp = "Supp" do
+                    Supplier of agent = item_ as aid
+        
+        return false 
+        
+    # isToyFinished: if the toy is finished return TRUE, else FALSE
+    function isToyFinished(curToy as BaseToy) as boolean do
+        if ("empty" = color of (head of curToy)) do 
+            return false 
+         
+        if ( "empty" = color of (arms of curToy)) do
+            return false 
+            
+        if ( "empty" = color of (legs of curToy)) do
+            return false 
+            
+        return true    
+            
+    # anyCompatiblePiece: if there's any piece that can be added to the toy return TRUE, else FALSE
+    function anyCompatiblePiece(availableParts as list of ToyParts, curToy as BaseToy) as boolean do   
+        missingPieces = [false, false, false]
+        available = [false, false, false]
+        if ("empty" = color of (head of curToy)) do 
+            missingPieces[0] = true
+         
+        if ( "empty" = color of (arms of curToy)) do
+            missingPieces[1] = true
+            
+        if ( "empty" = color of (legs of curToy)) do
+            missingPieces[2] = true
+            
+        for part_ in availableParts do
+            if (("head" = item of part_) and missingPieces[0] ) do
+                return true
+                
+            if (("arms" = item of part_) and missingPieces[1] ) do
+                return true
+                
+            if (("legs" = item of part_) and missingPieces[2] ) do
+                return true
+        
+        return false
+        
+    # canAddPiece: if you can add the piece of toy return TRUE, else FALSE
+    function canAddPiece(availablePiece as ToyParts, curToy as BaseToy) as boolean do
+        missingPieces = [false, false, false]
+        available = [false, false, false]
+        if ("empty" = color of (head of curToy)) do 
+            missingPieces[0] = true
+         
+        if ( "empty" = color of (arms of curToy)) do
+            missingPieces[1] = true
+            
+        if ( "empty" = color of (legs of curToy)) do
+            missingPieces[2] = true
+            
+        if (("head" = item of availablePiece) and missingPieces[0] ) do
+            return true
+            
+        if (("arms" = item of availablePiece) and missingPieces[1] ) do
+            return true
+            
+        if (("legs" = item of availablePiece) and missingPieces[2] ) do
+            return true
+        
+        return false
+      
+    # hasAnyItems: return if worker still has any piece in the inventory
+    function hasAnyItems(availableParts as list of ToyParts) as integer do
+        countItem = 0
+        tempInv_ = [] of ToyParts
+        
+        for item in availableParts do
+            countItem = countItem + 1            
+        return countItem
+   
+    # addPieceToToy: adds a piece to the toy, returns inventory updated
+    function addPieceToToy(toyPart as ToyParts) as list of ToyParts do
+	   tempToy = BaseToy(ToyParts("head", "empty"), ToyParts("arms", "empty"), ToyParts("legs", "empty")) as BaseToy
+	   
+	   if (item of toyPart = item of (head of currentToy of agent) ) do
+            tempToy = BaseToy(toyPart, arms of currentToy of agent, legs of currentToy of agent)
+            currentToy of agent = tempToy
+            remove toyPart from myInventory of agent
+                
+       if (item of toyPart = item of (arms of currentToy of agent) ) do
+            tempToy = BaseToy(head of currentToy of agent, toyPart,  legs of currentToy of agent)
+            currentToy of agent = tempToy
+            remove toyPart from myInventory of agent
+            
+       if (item of toyPart = item of (legs of currentToy of agent) ) do
+            tempToy = BaseToy(head of currentToy of agent, arms of currentToy of agent, toyPart)
+            currentToy of agent = tempToy
+            remove toyPart from myInventory of agent
+    
+       return myInventory of agent
+	
+	# lookAtReplies : returns true and sends a message if there are Workers that replied who are available or have the missing, otherwise return false
+    function lookAtReplies(list_replies as list of WorkerStatus) as boolean do
+        available_ = "Empty" as aid
+        hasPiece_ = "Empty" as aid
+        cur = BaseToy(ToyParts("head", "empty"), ToyParts("arms", "empty"), ToyParts("legs", "empty"))
+        
+        for Worker in list_replies do
+        
+            if Availability of Worker and HasMissingPieces of Worker do
+            
+                log "- WORKER " + name of agent + " POSITIVE + AVAILABLE : GIVE TOY TO " + name of sender of Worker
+                if not (isToyFinished(currentToy of agent)) do
+	                send message request passToyToWorker(currentToy) to sender of Worker
+	                hasToy of agent = false
+	                currentToy of agent = BaseToy(ToyParts("head", "empty"), ToyParts("arms", "empty"), ToyParts("legs", "empty")) as BaseToy
+                else do
+                    log "- WORKER " + name of agent + " : TOY FINISHED WHILE WAITING WORKERS REPLIES."
+                return true
+                
+            else if Availability of Worker and available_ = "Empty" as aid do
+                available_ = sender of Worker
+                
+            else if HasMissingPieces of Worker and hasPiece_ = "Empty" as aid do
+                hasPiece_ = sender of Worker
+        
+        # There's a Worker with the needed Piece but is occupied with an other Toy
+        if hasPiece_ ≠ "Empty" as aid do
+            log "- WORKER " + name of agent + " POSITIVE + NOT AVAILABLE : GIVE ME PART TO " + name of hasPiece_
+            send message request passNeededToyPart(currentToy) to hasPiece_
+            return true
+            
+        # No Worker with needed piece, but there's a Worker who's available to take the Toy
+        if available_ ≠ "Empty" as aid do
+            log "- WORKER " + name of agent + " NEGATIVE + AVAILABLE : GIVE TOY TO " + name of available_
+            send message request passToyToWorker(currentToy) to available_
+            hasToy of agent = false
+            currentToy of agent = BaseToy(ToyParts("head", "empty"), ToyParts("arms", "empty"), ToyParts("legs", "empty")) as BaseToy
+            return true
+        
+        return false
+   
+    # notifyWorkerToSupervisor : Notifies the Supervisor that the current Worker works for under their supervision
+    oneshot behaviour notifyWorkerToSupervisor
+        on execute do
+            send message inform notifySupervisor to Supervisor
+           
+    # confirmDelivery : On confirmation that the Finished Toy is delivered successfully
+    cyclic behaviour confirmDelivery
+        
+        on message request confirmFinishedToy(finishedToy as BaseToy) do
+            log "- WORKER " + name of agent + " : DELIVERED FINISHED TOY " + finishedToy #" NOW I HAVE A NEW ONE "
+            hasToy of agent = false
+            currentToy of agent = BaseToy(ToyParts("head", "empty"), ToyParts("arms", "empty"), ToyParts("legs", "empty"))
+            
+            waiting_Supervisor of agent = false
+            numberOfFinishedToys of agent = numberOfFinishedToys + 1
+            
+            if WorkerManager do
+                log "- WORKER " + name of agent + " : REQUEST NEW TOY NEW TOY"
+                send message request askToy(aid) to Supervisor of agent
+
+            activate AddPieceBehavior
+            destroy this
+       
+    # AskForNewToyParts_toSupplier : Ask to the SUPPLIER for new part if i don't have it 
+    cyclic behaviour AskForNewToyParts_toSupplier
+        property waitForNewToyPart as boolean
+        property sentRequest as boolean
+        
+        on create do 
+            waitForNewToyPart of this = false
+        
+        on execute do
+            # Make a request only if the worker is not already waiting for the supplier
+            if (waitForNewToyPart of this = false) do
+                waiting_Supplier of agent = true
+                sentRequest = false
+
+                # Check which favoriteToyParts to request
+                for item_ in favoriteToyParts do
+	                if (canAddPiece(item_, currentToy) and sentRequest = false) do
+	                        send message request askToyParts(item_) to Supplier of agent
+	                        numberOfSupplierRequest of agent = numberOfSupplierRequest + 1
+	                        sentRequest = true
+                        
+                waitForNewToyPart = true
+                waiting_Supplier of agent = true
+                activate AddPieceBehavior
+            
+                
+        on message request deliverNewToyParts(NewToyPart) do
+            if not stopWorking do
+	            add NewToyPart to myInventory of agent
+	            waiting_Supplier of agent = false
+	            log "- WORKER " + name of agent + " : AFTER I RECEIVED A NEW TOY PART I HAVE " + myInventory of agent
+	            
+	            if (currentTask of agent ≠ "WorkOnToy") do
+	                currentTask of agent = "WorkOnToy"
+	                activate AddPieceBehavior
+	            
+	            deactivate AskForNewToyParts_toSupplier
+            
+    # replyToWorker : Send to other Workers status as reply when asked for help
+    one shot behaviour replyToWorker
+        property worker as WorkerStatus
+        
+        on create with worker_ as WorkerStatus do
+           worker of this = worker_
+
+        on execute do
+            send message request replyToCoWorkers(Availability of worker, HasMissingPieces of worker) to sender of worker
+       
+    # EndOfShift : When Supervisor asks for a Working Report it means that the Worker should stop working   
+    cyclic behaviour EndOfShift
+        property UnUsedToyParts as integer
+        
+        on message inform sendWorkingReport do
+            stopWorking of agent = true
+            UnUsedToyParts = hasAnyItems(myInventory of agent)
+            send message inform deliverWorkingReport(numberOfWorkerRequest, UnUsedToyParts, numberOfSupplierRequest, numberOfFinishedToys, numberOfPartsPassed, numberOfToyPassed, aid of agent) to sender of message
+            destroy AddPieceBehavior
+            destroy listenWorkers
+            destroy AskForNewToyParts_toSupplier
+            
+    # listenWorkers : Always listen to workers around you for any possible messages
+    cyclic behaviour listenWorkers
+        property Availability as boolean
+        property HasMissingPieces as boolean
+        
+        # upon receiving a request of help, Worker replies with current status
+        on message request askForHelp(Toy) do
+            log "- WORKER " + name of agent + " I received a request from " + name of sender of message
+            Availability = (hasToy of agent = false)
+            HasMissingPieces  = (anyCompatiblePiece(myInventory of agent, Toy))
+            activate replyToWorker(WorkerStatus(sender of message, Availability as boolean, HasMissingPieces as boolean)) after "PT1S" as duration
+           
+        # upon receiving a toy from a Worker start working on it
+        on message request passToyToWorker(Toy) do
+            if hasToy of agent = false do
+	            log "- WORKER " + name of agent + " TOY GIVEN BY " + name of sender of message
+	            numberOfToyPassed of agent = numberOfToyPassed + 1
+	            hasToy of agent = true
+	            currentToy of agent = Toy
+	            currentTask of agent = "WorkOnToy"
+	            activate AddPieceBehavior
+	            
+            # If the Worker now has a Toy give back the Toy sent by the other Worker
+            else do
+                log "- WORKER " + name of agent + " : AVAILABILITY CHANGED GIVE BACK TOY TO " + name of sender of message
+                send message request passToyToWorker(Toy) to sender of message
+                numberOfToyPassed of agent = numberOfToyPassed + 1
+                activate AddPieceBehavior
+
+        # upon receiving the request to pass a toy part send it
+        on message request passNeededToyPart(Toy) do
+            log "- WORKER " + name of agent + " PASS TOY PART TO " + name of sender of message
+            for item_ in myInventory do
+                if (canAddPiece(item_, Toy)) do
+                    send message request deliverToyPart(item_) to sender of message
+                    numberOfPartsPassed of agent = numberOfPartsPassed + 1
+                    remove item_ from myInventory of agent
+                    break
+        
+        # Add ToyPart when another Worker gives you one
+        on message request deliverToyPart(ToyPart) do
+            log "- WORKER " + name of agent + " TOY PART GIVEN BY " + name of sender of message
+            add ToyPart to myInventory of agent
+            activate AddPieceBehavior
+        
+        # Add New Base Toy given by the Supervisor
+        on message request deliverNewToy(newToy) do
+            if hasToy of agent = false do
+	            log "- WORKER " + name of agent + " : I HAVE A NEW TOY"
+	            currentToy of agent = newToy
+	            hasToy of agent = true
+	            currentTask of agent = "WorkOnToy"
+	            activate AddPieceBehavior
+	            
+            # in case another Worker gives you a Toy while waiting send back New Toy to Supervisor
+            else do
+                log "- WORKER " + name of agent + " : I RECEIVED TOY WHILE WAITING GIVE BACK TO SUPERVISOR"
+                send message request passToyToWorker(newToy) to sender of message
+            
+    # listenReplyOfCoworkers : Listen to Worker's replies after asking for help
+    cyclic behaviour listenReplyOfCoworkers
+        property number_CoWorkers as integer
+        property repliesOfNearbyWorkers as list of WorkerStatus
+        property Replies as boolean
+        
+        on create do
+            number_CoWorkers of this = 0
+            
+        on message request replyToCoWorkers(Availability, HasMissingPieces) do
+            if not stopWorking do
+	            log "- WORKER " + name of agent + " : I RECEIVED REPLIES FROM " + name of sender of message + " Availability : " + Availability + " HasMissingPieces : " + HasMissingPieces
+	            number_CoWorkers of this = number_CoWorkers of this + 1
+	            add WorkerStatus(sender of message, Availability as boolean, HasMissingPieces as boolean) to repliesOfNearbyWorkers of this
+	
+	            # When Worker received all replies check them
+	            if number_CoWorkers = numberNeighbours of agent do
+	                Replies = lookAtReplies(repliesOfNearbyWorkers)
+	                
+	                if Replies = false do
+	                    send message request ComplaintReport(Supplier) to Supplier
+	                    
+	                waiting_CoWorkers of agent = false
+	                number_CoWorkers of this = 0
+	                repliesOfNearbyWorkers = [] of WorkerStatus
+	                destroy this
+
+    # AddPieceBehavior : Add piece if possible, otherwise check if Toy is complete or if its possible to get other ToyParts
+    oneshot behaviour AddPieceBehavior
+
+        on execute do
+            # If Supervisor said to stop working don't add other parts
+            if not stopWorking do
+            
+	            #Add Pieces only if Worker has a Toy
+	            if (hasToy of agent = true) do
+	            
+		            #If currentToy doesn't need more parts stop
+		            if (isToyFinished(currentToy of agent) and waiting_Supervisor of agent = false) do
+		                log "- WORKER " + name of agent + " : FINISHED TOY " + currentToy of agent
+		                waiting_Supervisor of agent = true
+		                send message request deliverFinishedToy(currentToy of agent) to Supervisor of agent
+		                activate confirmDelivery
+		            
+		            # Else try to add other ToyParts
+		            else do
+		                
+		                # Add piece only if waiting for Supplier or if you're just currently working on Toy
+			            if (currentTask of agent = "WaitingForPiece" or currentTask of agent = "WorkOnToy") do
+	                      
+				            # Check if there are ToyParts in inventory
+				            if (hasAnyItems(myInventory of agent) ≠ 0) do
+				                
+				                # Check if there are any piece that can be added to the currentToy
+				                if (anyCompatiblePiece(myInventory of agent, currentToy of agent)) do 
+				                    
+				                    for item_ in myInventory do
+					                    if (canAddPiece(item_, currentToy of agent)) do
+					                        log "- WORKER " + name of agent + " : ADDING PIECE " + item of item_ + " & UPDATED INVENTORY " + addPieceToToy(item_)
+					                        #UsedToyParts of agent = UsedToyParts + 1 
+					                        activate AddPieceBehavior
+					                        break
+					
+					            # If there are no piece that can be added to currentToy, ask for piece          
+				                else do
+	
+	                                currentTask of agent = "WaitingForPiece"
+
+	                                # If inventory isn't full, request ToyParts to Supplier                            
+	                                if (hasAnyItems(myInventory of agent) < 3) do
+	                                
+	                                     # If Worker isn't waiting for the Supplier request another ToyPart
+	                                     if (waiting_Supplier of agent = false) do
+	                                        log "- WORKER " + name of agent + " : REQUEST SENT TO SUPPLIER ... Toy Status : " + currentToy of agent
+	                                        activate AskForNewToyParts_toSupplier
+	                                        
+                                         # Else if request already sent ask other Workers
+	                                     else do
+	                                     
+	                                        # Ask for Help only if worker isn't waiting for Coworkers replies
+	                                        if hasAnyFriendWorkers and (waiting_CoWorkers of agent = false) do
+		                                        log "- WORKER " + name of agent + " : Asking for other workers help"
+		                                        send message request askForHelp(currentToy of agent) to nearbyWorkers of agent
+		                                        numberOfWorkerRequest of agent = numberOfWorkerRequest + 1
+		                                        activate listenReplyOfCoworkers
+		                                        waiting_CoWorkers of agent = true
+		                            
+		                            # If inventory is full ask for help of Workers
+	                                else do
+	                                
+	                                    # Ask for Help only if worker isn't waiting for Coworkers replies
+	                                    if hasAnyFriendWorkers and (waiting_CoWorkers of agent = false) do
+	                                        log "- WORKER " + name of agent + " : Asking for other workers help"
+	                                        send message request askForHelp(currentToy of agent) to nearbyWorkers of agent
+	                                        numberOfWorkerRequest of agent = numberOfWorkerRequest + 1
+	                                        activate listenReplyOfCoworkers
+	                                        waiting_CoWorkers of agent = true
+	                                
+		                    
+		                    # If Worker has no ToyParts in inventory
+				            else do
+				            
+				                currentTask of agent = "WaitingForPiece"
+				                
+				                # If Worker isn't waiting for the Supplier request another ToyPart
+				                if (waiting_Supplier of agent = false) do
+		                           log "- WORKER " + name of agent + " : REQUEST SENT TO SUPPLIER ... Toy Status : " + currentToy of agent 
+		                           activate AskForNewToyParts_toSupplier after "PT5S" as duration
+		                           
+	                            # Otherwise ask for help only if worker isn't waiting for Coworkers replies
+	                            else do
+	                            
+	                                if hasAnyFriendWorkers and (waiting_CoWorkers of agent = false) do 
+		                                log "- WORKER " + name of agent + " : Asking for other workers help"
+		                                send message request askForHelp(currentToy of agent) to nearbyWorkers of agent
+		                                numberOfWorkerRequest of agent = numberOfWorkerRequest + 1
+		                                activate listenReplyOfCoworkers
+		                                waiting_CoWorkers of agent = true
+
+	                    # If Worker is occupied
+			            else do
+			                log "- WORKER " + name of agent + " : WAITING.."
+			                
+			    # If Worker has no Toy            
+			    else do
+			       log "- WORKER " + name of agent + " : NO TOY ... AVAILABLE FOR COMUNICATION"       
+			            
+			       # Worker can ask for new Toy only if he is authorized to do so
+			       if WorkerManager do
+			          send message request askToy(aid) to Supervisor of agent        
+		                

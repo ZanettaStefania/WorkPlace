@@ -1,0 +1,34 @@
+
+ontology WorkOntology
+
+    concept Price(item as text, price as integer)
+    concept ToyParts(item as text, color as text)
+    concept BaseToy(head as ToyParts, arms as ToyParts, legs as ToyParts)
+    concept Request(sender as aid, toyPart as ToyParts)
+    concept WorkerStatus(sender as aid, Availability as boolean, HasMissingPieces as boolean)
+
+    action deliverFinishedToy(currentToy as BaseToy)
+    action confirmFinishedToy(currentToy as BaseToy)
+    
+    action askToy(sender as aid)
+    action deliverNewToy(currentToy as BaseToy)
+    
+    action askToyParts(PreferedPart as ToyParts)
+    action deliverNewToyParts(NewToyPart as ToyParts)
+    
+    action replyToCoWorkers(Availability as boolean, HasMissingPieces as boolean)
+    action passNeededToyPart(currentToy as BaseToy)
+    action passToyToWorker(currentToy as BaseToy)
+    action askForHelp(currentToy as BaseToy)
+    action deliverToyPart(NewToyPart as ToyParts)
+    
+    action ComplaintReport(Supplier as aid)
+    
+    predicate deliverWorkingReport(numberOfWorkerRequest as integer, UnUsedToyParts as integer, numberOfSupplierRequest as integer, numberOfFinishedToys as integer, numberOfPartsPassed as integer, numberOfToyPassed as integer, workerID as aid)
+    
+    proposition resolveTechnicalIssues
+    proposition informOnInitialToy
+    proposition requestAssistance
+    proposition sendWorkingReport
+    proposition notifySupervisor
+    

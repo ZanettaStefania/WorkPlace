@@ -22,6 +22,9 @@ The project explores agent interactions, coordination strategies, and system eff
   - Handle issues and complaints  
   - Declare shift completion  
 
+![image](https://github.com/user-attachments/assets/c01a2d03-a168-459a-9fd0-6d961e9b7ad5)
+
+
 ---
 
 ## Conclusion
